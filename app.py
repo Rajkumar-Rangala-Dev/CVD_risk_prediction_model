@@ -4,11 +4,18 @@ import numpy as np
 import joblib, os, io, zipfile
 import xgboost as xgb
 import matplotlib.pyplot as plt
+import os
+import shap
+
+
 
 st.set_page_config(page_title="Framingham Stacked CHD Risk", layout="wide")
-st.title("💓 10-Year CHD Risk Prediction — Stacked Ensemble Model")
+st.title(" 10-Year CHD Risk Prediction — Stacked Ensemble Model")
 
-ARTIFACT_DIR = "model_artifacts"
+
+
+BASE = os.path.dirname(os.path.abspath(__file__))
+ARTIFACT_DIR = os.path.join(BASE, "model_artifacts")
 REQUIRED = ["imputer.pkl", "scaler.pkl", "meta_clf.pkl", "xgb_booster_full.json", "threshold.txt"]
 
 # -----------------------------
@@ -267,3 +274,14 @@ if do_shap:
     ax3.barh(coef_df["Feature"], coef_df["Weight"])
     ax3.set_title("Meta Model (Logistic Regression) Weights")
     st.pyplot(fig3)
+
+# --------------------------------------------------
+# WORKING DIRECTORY DEBUG (auto-added by bash script)
+# --------------------------------------------------
+import os
+import streamlit as st
+st.write("🔍 WORKING DIR:", os.getcwd())
+st.write("📁 FILES:", os.listdir())
+st.write("📁 model_artifacts exists:", os.path.exists("model_artifacts"))
+# --------------------------------------------------
+
