@@ -1,192 +1,292 @@
+# app.py — Final deployment-ready Streamlit app for Framingham models
 import os
+import json
+import joblib
 import streamlit as st
 import pandas as pd
 import numpy as np
-import joblib
-import xgboost as xgb
-import shap
 import matplotlib.pyplot as plt
 
-# ======================================
-# PATCH: scikit-learn pickle compatibility
-# (fixes missing _fill_dtype error)
-# ======================================
-from sklearn.impute import SimpleImputer
-if not hasattr(SimpleImputer, "_fill_dtype"):
-    SimpleImputer._fill_dtype = None
+# Optional imports (may be heavy)
+try:
+    import xgboost as xgb
+except Exception:
+    xgb = None
 
+try:
+    import shap
+except Exception:
+    shap = None
 
-# ======================================
-# Final training feature order (18 features)
-# ======================================
+st.set_page_config(page_title="Framingham CVD — LR + XGBoost", layout="wide")
+st.title("❤️ 10-Year CHD Risk — Logistic Regression + XGBoost")
+
+# -------------------------
+# Paths & expected columns
+# -------------------------
+BASE = os.path.dirname(os.path.abspath(__file__))
+ARTIFACT_DIR = os.path.join(BASE, "model_artifacts")
+
 EXPECTED_COLS = [
-    "male",
     "age",
-    "education",
-    "currentSmoker",
-    "cigsPerDay",
-    "BPMeds",
-    "prevalentStroke",
-    "prevalentHyp",
-    "diabetes",
+    "sex",
     "totChol",
     "sysBP",
     "diaBP",
     "BMI",
-    "heartRate",
+    "currentSmoker",
+    "cigsPerDay",
+    "BPMeds",
+    "diabetes",
     "glucose",
-    "pulse_pressure",
-    "chol_per_bmi",
-    "age_sysbp"
+    "heartRate"
 ]
 
+# -------------------------
+# Helper: load artifact safely
+# -------------------------
+def load_artifact(path):
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+    # Try joblib first (pickled sklearn/xgboost objects)
+    try:
+        return joblib.load(path)
+    except Exception as e_joblib:
+        # If xgboost Booster saved as model file, try xgboost.Booster().load_model
+        if xgb is not None:
+            try:
+                b = xgb.Booster()
+                b.load_model(path)
+                return b
+            except Exception:
+                pass
+        # re-raise original joblib error for clarity
+        raise e_joblib
 
-# ======================================
-# Load all model artifacts
-# ======================================
-BASE = os.path.dirname(os.path.abspath(__file__))
-ARTIFACT_DIR = os.path.join(BASE, "model_artifacts")
+# -------------------------
+# Load models & artifacts
+# -------------------------
+missing = []
+for fname in ["lr_model.pkl", "xgb_model.pkl", "scaler.pkl"]:
+    if not os.path.exists(os.path.join(ARTIFACT_DIR, fname)):
+        missing.append(fname)
 
-def load_artifacts():
-    imputer = joblib.load(os.path.join(ARTIFACT_DIR, "imputer.pkl"))
-    scaler = joblib.load(os.path.join(ARTIFACT_DIR, "scaler.pkl"))
-    lr_base = joblib.load(os.path.join(ARTIFACT_DIR, "lr_base.pkl"))
-    rf_base = joblib.load(os.path.join(ARTIFACT_DIR, "rf_base.pkl"))
-    meta_clf = joblib.load(os.path.join(ARTIFACT_DIR, "meta_clf.pkl"))
+if missing:
+    st.error(f"Missing artifacts in {ARTIFACT_DIR}: {missing}. Upload them and reload.")
+    st.stop()
 
-    booster = xgb.Booster()
-    booster.load_model(os.path.join(ARTIFACT_DIR, "xgb_booster_full.json"))
+# Load LR and Scaler
+try:
+    lr_model = load_artifact(os.path.join(ARTIFACT_DIR, "lr_model.pkl"))
+except Exception as e:
+    st.error(f"Failed loading lr_model.pkl: {e}")
+    st.stop()
 
-    with open(os.path.join(ARTIFACT_DIR, "threshold.txt"), "r") as f:
-        threshold = float(f.read().strip())
+try:
+    scaler = load_artifact(os.path.join(ARTIFACT_DIR, "scaler.pkl"))
+except Exception as e:
+    st.error(f"Failed loading scaler.pkl: {e}")
+    st.stop()
 
-    return imputer, scaler, lr_base, rf_base, booster, meta_clf, threshold
+# Load XGBoost (may return Booster or sklearn XGBClassifier)
+try:
+    xgb_obj = load_artifact(os.path.join(ARTIFACT_DIR, "xgb_model.pkl"))
+except Exception as e:
+    st.error(f"Failed loading xgb_model.pkl: {e}")
+    st.stop()
 
+# Optional: SHAP background
+shap_background = None
+shap_path = os.path.join(ARTIFACT_DIR, "shap_background.pkl")
+if os.path.exists(shap_path):
+    try:
+        shap_background = joblib.load(shap_path)
+    except Exception:
+        try:
+            shap_background = joblib.load(shap_path, mmap_mode=None)
+        except Exception:
+            shap_background = None
 
-imputer, scaler, lr_base, rf_base, booster, meta_clf, threshold = load_artifacts()
+# Optional metrics
+metrics = None
+metrics_path = os.path.join(ARTIFACT_DIR, "model_metrics.json")
+if os.path.exists(metrics_path):
+    try:
+        with open(metrics_path, "r") as f:
+            metrics = json.load(f)
+    except Exception:
+        metrics = None
 
-
-# ======================================
-# Streamlit UI
-# ======================================
-st.set_page_config(page_title="CVD Risk Predictor", layout="centered")
-st.title("❤️ 10-Year Coronary Heart Disease Risk Prediction")
-
-
-# --------------------------------------
-# Collect Inputs
-# --------------------------------------
-st.sidebar.header("Patient Information")
+# -------------------------
+# Sidebar: patient inputs (exact training features)
+# -------------------------
+st.sidebar.header("Patient inputs — match training features")
 
 age = st.sidebar.number_input("Age", 20, 100, 50)
-male = st.sidebar.selectbox("Sex (Male=1, Female=0)", [1, 0])
-education = st.sidebar.selectbox("Education Level (1–4)", [1, 2, 3, 4])
-
-currentSmoker_num = st.sidebar.selectbox("Current Smoker?", [0, 1])
-cigsPerDay = st.sidebar.number_input("Cigarettes per day", 0, 80, 0)
-
-BPMeds_num = st.sidebar.selectbox("On BP Medication?", [0, 1])
-prevalentStroke_num = st.sidebar.selectbox("History of Stroke?", [0, 1])
-prevalentHyp_num = st.sidebar.selectbox("Hypertension?", [0, 1])
-diabetes_num = st.sidebar.selectbox("Diabetes?", [0, 1])
-
-totChol = st.sidebar.number_input("Total Cholesterol", 100, 400, 180)
+sex = st.sidebar.selectbox("Sex (1=Male, 0=Female)", [1, 0], index=0)  # training used sex (numeric)
+totChol = st.sidebar.number_input("Total Cholesterol (mg/dL)", 100, 400, 180)
 sysBP = st.sidebar.number_input("Systolic BP", 90, 240, 120)
-diaBP = st.sidebar.number_input("Diastolic BP", 50, 140, 80)
-BMI = st.sidebar.number_input("BMI", 10.0, 60.0, 25.0)
-heartRate = st.sidebar.number_input("Heart Rate", 40, 140, 75)
-glucose = st.sidebar.number_input("Glucose", 50, 300, 90)
+diaBP = st.sidebar.number_input("Diastolic BP", 50, 160, 80)
+BMI = st.sidebar.number_input("BMI (kg/m2)", 10.0, 60.0, 25.0, 0.1)
+currentSmoker = st.sidebar.selectbox("Current smoker?", [0, 1], index=0)
+cigsPerDay = st.sidebar.number_input("Cigarettes per day", 0, 80, 0)
+BPMeds = st.sidebar.selectbox("On BP medication?", [0, 1], index=0)
+diabetes = st.sidebar.selectbox("Diabetes?", [0, 1], index=0)
+glucose = st.sidebar.number_input("Glucose (mg/dL)", 40, 400, 90)
+heartRate = st.sidebar.number_input("Heart rate (bpm)", 30, 150, 70)
 
+# Threshold slider for decision
+st.sidebar.header("Decision threshold")
+threshold = st.sidebar.slider("Threshold for positive (CHD)", 0.0, 1.0, 0.5, 0.01)
 
-# ======================================
-# Build input_df
-# ======================================
+# -------------------------
+# Build input dataframe in the same order as training
+# -------------------------
 input_df = pd.DataFrame([{
-    "male": male,
     "age": age,
-    "education": education,
-    "currentSmoker": currentSmoker_num,
-    "cigsPerDay": cigsPerDay,
-    "BPMeds": BPMeds_num,
-    "prevalentStroke": prevalentStroke_num,
-    "prevalentHyp": prevalentHyp_num,
-    "diabetes": diabetes_num,
+    "sex": sex,
     "totChol": totChol,
     "sysBP": sysBP,
     "diaBP": diaBP,
     "BMI": BMI,
-    "heartRate": heartRate,
+    "currentSmoker": currentSmoker,
+    "cigsPerDay": cigsPerDay,
+    "BPMeds": BPMeds,
+    "diabetes": diabetes,
     "glucose": glucose,
+    "heartRate": heartRate
 }])
 
-# Add engineered features exactly as training did
-input_df["pulse_pressure"] = input_df["sysBP"] - input_df["diaBP"]
-input_df["chol_per_bmi"] = input_df["totChol"] / (input_df["BMI"] + 1e-9)
-input_df["age_sysbp"] = input_df["age"] * input_df["sysBP"]
+# Reorder & validate
+try:
+    input_df = input_df[EXPECTED_COLS]
+except Exception as e:
+    st.error(f"Your app expects columns: {EXPECTED_COLS}. Built input columns were: {list(input_df.columns)}. Error: {e}")
+    st.stop()
 
-# Reorder columns
-input_df = input_df[EXPECTED_COLS]
+st.subheader("Input summary")
+st.table(input_df.T)
 
+# -------------------------
+# Preprocess & predict
+# -------------------------
+# LR needs scaled inputs (trained on StandardScaler)
+try:
+    X_scaled = scaler.transform(input_df)
+except Exception as e:
+    st.error(f"Scaler.transform failed: {e}")
+    st.stop()
 
-# ======================================
-# Preprocessing
-# ======================================
-X_imp = pd.DataFrame(imputer.transform(input_df), columns=EXPECTED_COLS)
-X_scaled = pd.DataFrame(scaler.transform(X_imp), columns=EXPECTED_COLS)
+# LR probability
+try:
+    p_lr = float(lr_model.predict_proba(X_scaled)[:, 1][0])
+except Exception as e:
+    st.error(f"LogisticRegression predict_proba failed: {e}")
+    st.stop()
 
-# Base model probabilities
-p_lr = lr_base.predict_proba(X_scaled)[0, 1]
-p_rf = rf_base.predict_proba(X_scaled)[0, 1]
+# XGBoost: if it's a sklearn wrapper (XGBClassifier), call predict_proba on raw features;
+# if it's a native Booster, construct DMatrix and call booster.predict
+p_xgb = None
+try:
+    # sklearn wrapper (XGBClassifier or similar)
+    if hasattr(xgb_obj, "predict_proba"):
+        p_xgb = float(xgb_obj.predict_proba(input_df)[:, 1][0])
+    else:
+        # native booster
+        if xgb is None:
+            raise RuntimeError("xgboost not available in runtime")
+        dmat = xgb.DMatrix(input_df.values, feature_names=EXPECTED_COLS)
+        # Some boosters return array shape (1,) or (n,), take first
+        p_xgb = float(xgb_obj.predict(dmat)[0])
+except Exception as e:
+    st.error(f"XGBoost prediction failed: {e}")
+    st.stop()
 
-# XGBoost prob
-dmat = xgb.DMatrix(X_imp.values, feature_names=EXPECTED_COLS)
-p_xgb = booster.predict(dmat)[0]
+# Ensemble simple average (or you can choose another logic)
+p_ensemble = float(np.mean([p_lr, p_xgb]))
 
-# Meta model (stacking)
-meta_input = np.array([[p_lr, p_rf, p_xgb]])
-p_final = meta_clf.predict_proba(meta_input)[0, 1]
+pred_label = int(p_ensemble >= threshold)
 
+# -------------------------
+# Display predictions & model probabilities
+# -------------------------
+st.subheader("🔎 Model predictions (individual & ensemble)")
+pred_df = pd.DataFrame({
+    "Model": ["Logistic Regression", "XGBoost", "Ensemble (avg)"],
+    "Probability": [p_lr, p_xgb, p_ensemble]
+})
+st.table(pred_df.style.format({"Probability": "{:.4f}"}))
 
-# ======================================
-# Display prediction
-# ======================================
-st.subheader("🩺 Predicted 10-Year CHD Risk")
-st.metric("Risk Probability", f"{p_final*100:.2f}%")
-st.write(f"Decision Threshold: **{threshold:.3f}**")
+st.markdown(f"**Ensemble decision (threshold = {threshold:.2f})**: **{pred_label}** ({'CHD risk' if pred_label==1 else 'No CHD risk'})")
+st.metric("Ensemble probability", f"{p_ensemble*100:.2f}%")
 
-risk = (
-    "🟢 Low Risk" if p_final < 0.10 else
-    "🟡 Moderate Risk" if p_final < 0.20 else
-    "🔴 High Risk"
-)
-st.write(f"Risk Category: **{risk}**")
+# -------------------------
+# Show training metrics if provided
+# -------------------------
+st.subheader("📈 Model performance (from training)")
+if metrics:
+    perf_df = pd.DataFrame({
+        "Model": ["Logistic Regression", "XGBoost", "Ensemble"],
+        "AUC": [metrics.get("lr_auc"), metrics.get("xgb_auc"), metrics.get("ensemble_auc")],
+        "Accuracy": [metrics.get("lr_accuracy"), metrics.get("xgb_accuracy"), metrics.get("ensemble_accuracy")]
+    })
+    st.table(perf_df)
+else:
+    st.info("No model_metrics.json found in model_artifacts/ — upload it to display AUC/accuracy from training.")
 
+# -------------------------
+# SHAP explanations for XGBoost (single sample)
+# -------------------------
+st.subheader("🧠 SHAP explainability (XGBoost)")
 
-# ======================================
-# SHAP Explainability
-# ======================================
-if st.checkbox("Show SHAP Explanation (XGBoost)"):
+if shap is None:
+    st.warning("SHAP not installed in this environment. Install shap in requirements.txt to enable explanations.")
+else:
+    if st.checkbox("Show SHAP for XGBoost"):
+        try:
+            # Build explainer depending on xgb object type
+            if hasattr(xgb_obj, "predict_proba") and hasattr(xgb_obj, "get_booster"):
+                # sklearn wrapper
+                explainer = shap.TreeExplainer(xgb_obj.get_booster())
+                bkg = shap_background if shap_background is not None else None
+                shap_values = explainer.shap_values(input_df, background_dataset=bkg)
+            else:
+                # native booster
+                explainer = shap.TreeExplainer(xgb_obj)
+                bkg = shap_background if shap_background is not None else None
+                # shap may return various shapes; handle robustly
+                shap_out = explainer.shap_values(input_df if bkg is None else (input_df, bkg))
+                # normalize to vector
+                if isinstance(shap_out, list):
+                    shap_vec = np.array(shap_out[-1])[0]
+                else:
+                    arr = np.array(shap_out)
+                    if arr.ndim == 3:  # (1, n_features, n_classes)
+                        shap_vec = arr[0, :, -1]
+                    elif arr.ndim == 2:
+                        shap_vec = arr[0]
+                    else:
+                        shap_vec = arr
+                shap_df = pd.DataFrame({"feature": EXPECTED_COLS, "shap_value": shap_vec})
+                shap_df = shap_df.reindex(shap_df.shap_value.abs().sort_values(ascending=False).index)
 
-    explainer = shap.TreeExplainer(booster)
-    shap_vals = explainer.shap_values(X_imp)
+                fig, ax = plt.subplots(figsize=(7, 5))
+                ax.barh(shap_df["feature"], shap_df["shap_value"])
+                ax.invert_yaxis()
+                ax.set_title("XGBoost SHAP (single sample)")
+                st.pyplot(fig)
+                st.dataframe(shap_df)
+        except Exception as e:
+            st.error(f"SHAP explanation failed: {e}")
 
-    shap_vec = shap_vals[0] if shap_vals.ndim == 2 else shap_vals[0, :, 0]
+# -------------------------
+# Debug info & artifact listing
+# -------------------------
+with st.expander("Debug & artifacts"):
+    st.write("Working dir:", BASE)
+    st.write("Artifact folder exists:", os.path.exists(ARTIFACT_DIR))
+    if os.path.exists(ARTIFACT_DIR):
+        st.write(sorted(os.listdir(ARTIFACT_DIR)))
+    st.write("Input DF columns:", list(input_df.columns))
+    st.write("EXPECTED_COLS:", EXPECTED_COLS)
 
-    shap_df = pd.DataFrame({
-        "feature": EXPECTED_COLS,
-        "shap_value": shap_vec
-    }).sort_values("shap_value", key=abs, ascending=False)
-
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.barh(shap_df["feature"], shap_df["shap_value"])
-    ax.invert_yaxis()
-    st.pyplot(fig)
-
-    st.dataframe(shap_df)
-
-
-# Debug information
-with st.expander("Debug Info"):
-    st.write("Columns sent to model:", EXPECTED_COLS)
-    st.write("Input DF:", input_df)
-    st.write("Imputed DF:", X_imp)
