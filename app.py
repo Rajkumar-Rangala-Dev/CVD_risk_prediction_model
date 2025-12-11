@@ -1,127 +1,25 @@
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
 import xgboost as xgb
 import shap
-import os
 import matplotlib.pyplot as plt
 
-# -------------------------------------------------------------
-# SimpleImputer BACKWARD COMPATIBILITY SHIM (CRITICAL)
-# -------------------------------------------------------------
-# Many older scikit-learn versions saved SimpleImputer with internal
-# attributes that no longer exist in sklearn >= 1.5 (Cloud default).
+# ======================================
+# PATCH: scikit-learn pickle compatibility
+# (fixes missing _fill_dtype error)
+# ======================================
 from sklearn.impute import SimpleImputer
-
 if not hasattr(SimpleImputer, "_fill_dtype"):
     SimpleImputer._fill_dtype = None
-# -------------------------------------------------------------
 
 
-# ----------------------------
-# Streamlit Page Setup
-# ----------------------------
-st.set_page_config(page_title="10-Year CVD Risk Predictor", layout="wide")
-st.title("❤️ 10-Year Coronary Heart Disease Risk — Stacked Ensemble Model")
-
-
-# ----------------------------
-# Artifact loading utilities
-# ----------------------------
-BASE = os.path.dirname(os.path.abspath(__file__))
-ARTIFACT_DIR = os.path.join(BASE, "model_artifacts")
-
-REQUIRED = [
-    "imputer.pkl",
-    "scaler.pkl",
-    "lr_base.pkl",
-    "rf_base.pkl",
-    "meta_clf.pkl",
-    "xgb_booster_full.json",
-    "threshold.txt",
-]
-
-
-def load_artifacts():
-    """Load all model artifacts safely."""
-    loaded = {}
-    missing = []
-
-    for fn in REQUIRED:
-        path = os.path.join(ARTIFACT_DIR, fn)
-        if os.path.exists(path):
-            loaded[fn] = path
-        else:
-            missing.append(fn)
-
-    if missing:
-        st.error(f"Missing required artifacts: {missing}")
-        st.stop()
-
-    # Load objects
-    imputer = joblib.load(loaded["imputer.pkl"])
-    scaler = joblib.load(loaded["scaler.pkl"])
-    lr_base = joblib.load(loaded["lr_base.pkl"])
-    rf_base = joblib.load(loaded["rf_base.pkl"])
-    meta_clf = joblib.load(loaded["meta_clf.pkl"])
-
-    # Load XGBoost Booster (2.x compatible)
-    booster = xgb.Booster()
-    booster.load_model(loaded["xgb_booster_full.json"])
-
-    # Load threshold
-    with open(loaded["threshold.txt"], "r") as f:
-        threshold = float(f.read().strip())
-
-    return imputer, scaler, lr_base, rf_base, booster, meta_clf, threshold
-
-
-# Load everything up front
-imputer, scaler, lr_base, rf_base, booster, meta_clf, threshold = load_artifacts()
-
-# TEMPORARY: Print exact features expected by the imputer
-try:
-    st.write("IMPUTER FEATURES:", list(imputer.feature_names_in_))
-except Exception as e:
-    st.write("Could not read imputer.feature_names_in_:", e)
-    
-# ----------------------------
-# Sidebar Input Form
-# ----------------------------
-st.sidebar.header("Enter Patient Information")
-
-def sidebar_inputs():
-    return pd.DataFrame([{
-        "age": st.sidebar.number_input("Age", 20, 100, 50),
-        "education": st.sidebar.selectbox("Education Level", [1, 2, 3, 4], index=0),
-        "currentSmoker": st.sidebar.selectbox("Current Smoker?", [0, 1], index=0),
-        "cigsPerDay": st.sidebar.number_input("Cigarettes per day", 0, 80, 0),
-        "BPMeds": st.sidebar.selectbox("On BP Medication?", [0, 1], index=0),
-        "prevalentStroke": st.sidebar.selectbox("History of Stroke?", [0, 1], index=0),
-        "prevalentHyp": st.sidebar.selectbox("Hypertension?", [0, 1], index=0),
-        "diabetes": st.sidebar.selectbox("Diabetes?", [0, 1], index=0),
-        "totChol": st.sidebar.number_input("Total Cholesterol", 100, 400, 180),
-        "sysBP": st.sidebar.number_input("Systolic BP", 90, 240, 120),
-        "diaBP": st.sidebar.number_input("Diastolic BP", 50, 140, 80),
-        "BMI": st.sidebar.number_input("BMI", 10.0, 60.0, 25.0),
-        "heartRate": st.sidebar.number_input("Heart Rate", 40, 140, 75),
-        "glucose": st.sidebar.number_input("Glucose", 50, 300, 90),
-        "sex": st.sidebar.selectbox("Sex (1=Male, 0=Female)", [0, 1], index=1),
-    }])
-
-
-input_df = sidebar_inputs()
-
-# ---------------------------------------------------------
-# TRAINING FEATURE ENGINEERING RECONSTRUCTION
-# ---------------------------------------------------------
-input_df["age_sysbp"] = input_df["age"] * input_df["sysBP"]
-input_df["chol_per_bmi"] = input_df["totChol"] / input_df["BMI"]
-input_df["pulse_pressure"] = input_df["sysBP"] - input_df["diaBP"]
-
-# ORDER MUST MATCH TRAINING EXACTLY
-expected_cols = [
+# ======================================
+# Final training feature order (18 features)
+# ======================================
+EXPECTED_COLS = [
     "male",
     "age",
     "education",
@@ -143,92 +41,152 @@ expected_cols = [
 ]
 
 
-# Ensure ALL expected columns exist
-missing_cols = [c for c in expected_cols if c not in input_df.columns]
-if missing_cols:
-    st.error(f"Missing columns in input: {missing_cols}")
-    st.stop()
+# ======================================
+# Load all model artifacts
+# ======================================
+BASE = os.path.dirname(os.path.abspath(__file__))
+ARTIFACT_DIR = os.path.join(BASE, "model_artifacts")
 
-# Reorder
-input_df = input_df[expected_cols]
+def load_artifacts():
+    imputer = joblib.load(os.path.join(ARTIFACT_DIR, "imputer.pkl"))
+    scaler = joblib.load(os.path.join(ARTIFACT_DIR, "scaler.pkl"))
+    lr_base = joblib.load(os.path.join(ARTIFACT_DIR, "lr_base.pkl"))
+    rf_base = joblib.load(os.path.join(ARTIFACT_DIR, "rf_base.pkl"))
+    meta_clf = joblib.load(os.path.join(ARTIFACT_DIR, "meta_clf.pkl"))
+
+    booster = xgb.Booster()
+    booster.load_model(os.path.join(ARTIFACT_DIR, "xgb_booster_full.json"))
+
+    with open(os.path.join(ARTIFACT_DIR, "threshold.txt"), "r") as f:
+        threshold = float(f.read().strip())
+
+    return imputer, scaler, lr_base, rf_base, booster, meta_clf, threshold
 
 
-# ----------------------------
-# RUN PREDICTION
-# ----------------------------
-st.subheader("📊 Prediction Result")
+imputer, scaler, lr_base, rf_base, booster, meta_clf, threshold = load_artifacts()
 
-# Impute missing values
-X_imp = pd.DataFrame(
-    imputer.transform(input_df),
-    columns=input_df.columns
+
+# ======================================
+# Streamlit UI
+# ======================================
+st.set_page_config(page_title="CVD Risk Predictor", layout="centered")
+st.title("❤️ 10-Year Coronary Heart Disease Risk Prediction")
+
+
+# --------------------------------------
+# Collect Inputs
+# --------------------------------------
+st.sidebar.header("Patient Information")
+
+age = st.sidebar.number_input("Age", 20, 100, 50)
+male = st.sidebar.selectbox("Sex (Male=1, Female=0)", [1, 0])
+education = st.sidebar.selectbox("Education Level (1–4)", [1, 2, 3, 4])
+
+currentSmoker_num = st.sidebar.selectbox("Current Smoker?", [0, 1])
+cigsPerDay = st.sidebar.number_input("Cigarettes per day", 0, 80, 0)
+
+BPMeds_num = st.sidebar.selectbox("On BP Medication?", [0, 1])
+prevalentStroke_num = st.sidebar.selectbox("History of Stroke?", [0, 1])
+prevalentHyp_num = st.sidebar.selectbox("Hypertension?", [0, 1])
+diabetes_num = st.sidebar.selectbox("Diabetes?", [0, 1])
+
+totChol = st.sidebar.number_input("Total Cholesterol", 100, 400, 180)
+sysBP = st.sidebar.number_input("Systolic BP", 90, 240, 120)
+diaBP = st.sidebar.number_input("Diastolic BP", 50, 140, 80)
+BMI = st.sidebar.number_input("BMI", 10.0, 60.0, 25.0)
+heartRate = st.sidebar.number_input("Heart Rate", 40, 140, 75)
+glucose = st.sidebar.number_input("Glucose", 50, 300, 90)
+
+
+# ======================================
+# Build input_df
+# ======================================
+input_df = pd.DataFrame([{
+    "male": male,
+    "age": age,
+    "education": education,
+    "currentSmoker": currentSmoker_num,
+    "cigsPerDay": cigsPerDay,
+    "BPMeds": BPMeds_num,
+    "prevalentStroke": prevalentStroke_num,
+    "prevalentHyp": prevalentHyp_num,
+    "diabetes": diabetes_num,
+    "totChol": totChol,
+    "sysBP": sysBP,
+    "diaBP": diaBP,
+    "BMI": BMI,
+    "heartRate": heartRate,
+    "glucose": glucose,
+}])
+
+# Add engineered features exactly as training did
+input_df["pulse_pressure"] = input_df["sysBP"] - input_df["diaBP"]
+input_df["chol_per_bmi"] = input_df["totChol"] / (input_df["BMI"] + 1e-9)
+input_df["age_sysbp"] = input_df["age"] * input_df["sysBP"]
+
+# Reorder columns
+input_df = input_df[EXPECTED_COLS]
+
+
+# ======================================
+# Preprocessing
+# ======================================
+X_imp = pd.DataFrame(imputer.transform(input_df), columns=EXPECTED_COLS)
+X_scaled = pd.DataFrame(scaler.transform(X_imp), columns=EXPECTED_COLS)
+
+# Base model probabilities
+p_lr = lr_base.predict_proba(X_scaled)[0, 1]
+p_rf = rf_base.predict_proba(X_scaled)[0, 1]
+
+# XGBoost prob
+dmat = xgb.DMatrix(X_imp.values, feature_names=EXPECTED_COLS)
+p_xgb = booster.predict(dmat)[0]
+
+# Meta model (stacking)
+meta_input = np.array([[p_lr, p_rf, p_xgb]])
+p_final = meta_clf.predict_proba(meta_input)[0, 1]
+
+
+# ======================================
+# Display prediction
+# ======================================
+st.subheader("🩺 Predicted 10-Year CHD Risk")
+st.metric("Risk Probability", f"{p_final*100:.2f}%")
+st.write(f"Decision Threshold: **{threshold:.3f}**")
+
+risk = (
+    "🟢 Low Risk" if p_final < 0.10 else
+    "🟡 Moderate Risk" if p_final < 0.20 else
+    "🔴 High Risk"
 )
-
-# Scale input
-X_scaled = scaler.transform(X_imp)
-
-# Base model outputs
-p_lr = lr_base.predict_proba(X_scaled)[:, 1]
-p_rf = rf_base.predict_proba(X_imp)[:, 1]
-
-# XGBoost prediction
-dmat = xgb.DMatrix(X_imp.values, feature_names=X_imp.columns.tolist())
-p_xgb = booster.predict(dmat)
-
-# Stack features
-stack_input = np.column_stack([p_lr, p_rf, p_xgb])
-
-# Final prediction
-p_final = meta_clf.predict_proba(stack_input)[0, 1]
+st.write(f"Risk Category: **{risk}**")
 
 
-# ----------------------------
-# Apply Risk Threshold
-# ----------------------------
-pred_class = 1 if p_final >= threshold else 0
+# ======================================
+# SHAP Explainability
+# ======================================
+if st.checkbox("Show SHAP Explanation (XGBoost)"):
 
-risk_level = (
-    "🟢 LOW RISK" if p_final < 0.15 else
-    "🟡 MODERATE RISK" if p_final < 0.30 else
-    "🔴 HIGH RISK"
-)
-
-st.metric("Estimated 10-Year CHD Risk", f"{p_final*100:.2f}%")
-st.write(f"**Risk Level:** {risk_level}")
-st.write(f"**Decision Threshold:** {threshold:.3f}")
-
-
-# ----------------------------
-# SHAP EXPLAINABILITY
-# ----------------------------
-st.subheader("🧠 Model Explainability (SHAP)")
-
-explain = st.checkbox("Show SHAP Explanation")
-
-if explain:
-    # XGBoost SHAP
     explainer = shap.TreeExplainer(booster)
-    shap_values = explainer.shap_values(dmat)[0]  # 1 sample
+    shap_vals = explainer.shap_values(X_imp)
+
+    shap_vec = shap_vals[0] if shap_vals.ndim == 2 else shap_vals[0, :, 0]
 
     shap_df = pd.DataFrame({
-        "feature": X_imp.columns,
-        "shap_value": shap_values
+        "feature": EXPECTED_COLS,
+        "shap_value": shap_vec
     }).sort_values("shap_value", key=abs, ascending=False)
 
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.barh(shap_df["feature"], shap_df["shap_value"])
     ax.invert_yaxis()
-    ax.set_title("XGBoost SHAP Feature Impact")
     st.pyplot(fig)
 
     st.dataframe(shap_df)
 
 
-# ----------------------------
-# DEBUG INFO (optional)
-# ----------------------------
+# Debug information
 with st.expander("Debug Info"):
-    st.write("Working Directory:", os.getcwd())
-    st.write("Files:", os.listdir())
-    st.write("Artifacts exist:", os.path.exists(ARTIFACT_DIR))
-
+    st.write("Columns sent to model:", EXPECTED_COLS)
+    st.write("Input DF:", input_df)
+    st.write("Imputed DF:", X_imp)
