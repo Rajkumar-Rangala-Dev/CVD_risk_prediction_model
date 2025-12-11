@@ -8,6 +8,18 @@ import os
 import shap
 
 
+# --- Compatibility shim for SimpleImputer pickles ---
+try:
+    # import first to ensure sklearn is installed in the runtime
+    from sklearn.impute import SimpleImputer
+    # If the attribute doesn't exist on the class (new sklearn), add it.
+    if not hasattr(SimpleImputer, "_fill_dtype"):
+        # set a sensible default; transform logic will still work if statistics_ exists
+        setattr(SimpleImputer, "_fill_dtype", None)
+except Exception as _e:
+    # If sklearn isn't available yet, we'll let the later code fail with a clearer message
+    pass
+# --- End shim ---
 
 st.set_page_config(page_title="Framingham Stacked CHD Risk", layout="wide")
 st.title(" 10-Year CHD Risk Prediction — Stacked Ensemble Model")
