@@ -108,6 +108,25 @@ def sidebar_inputs():
 
 input_df = sidebar_inputs()
 
+# ---------------------------------------------------------
+# RECREATE TRAINING FEATURE ENGINEERING
+# ---------------------------------------------------------
+# Add engineered features
+input_df["age_sysbp"] = input_df["age"] * input_df["sysBP"]
+input_df["chol_per_bmi"] = input_df["totChol"] / input_df["BMI"]
+input_df["pulse_pressure"] = input_df["sysBP"] - input_df["diaBP"]
+# ---------------------------------------------------------
+
+# Reorder columns to match training model
+expected_cols = [
+    "age", "education", "currentSmoker", "cigsPerDay", "BPMeds",
+    "prevalentStroke", "prevalentHyp", "diabetes", "totChol",
+    "sysBP", "diaBP", "BMI", "heartRate", "glucose", "male",
+    "age_sysbp", "chol_per_bmi", "pulse_pressure"
+]
+
+input_df = input_df[expected_cols]
+
 
 # ----------------------------
 # RUN PREDICTION
