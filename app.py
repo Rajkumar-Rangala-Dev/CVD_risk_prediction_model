@@ -102,7 +102,7 @@ def sidebar_inputs():
         "BMI": st.sidebar.number_input("BMI", 10.0, 60.0, 25.0),
         "heartRate": st.sidebar.number_input("Heart Rate", 40, 140, 75),
         "glucose": st.sidebar.number_input("Glucose", 50, 300, 90),
-        "male": st.sidebar.selectbox("Sex (1=Male, 0=Female)", [0, 1], index=1),
+        "sex": st.sidebar.selectbox("Sex (1=Male, 0=Female)", [0, 1], index=1),
     }])
 
 
