@@ -44,63 +44,48 @@ def load_artifacts():
 imputer, scaler, lr_model, rf_base, xgb_booster = load_artifacts()
 
 # ============================================
-# FEATURE DEFINITIONS (MUST MATCH TRAINING)
+# BUILD INPUT DATAFRAME (18 FEATURES)
 # ============================================
-FEATURES = [
-  'male',
- 'age',
- 'education',
- 'currentSmoker',
- 'cigsPerDay',
- 'BPMeds',
- 'prevalentStroke',
- 'prevalentHyp',
- 'diabetes',
- 'totChol',
- 'sysBP',
- 'diaBP',
- 'BMI',
- 'heartRate',
- 'glucose',
- 'pulse_pressure',
- 'chol_per_bmi',
- 'age_sysbp'
-]
-
-# ============================================
-# SIDEBAR INPUTS
-# ============================================
-st.sidebar.header("Patient Information")
-
-def num(label, min_, max_, default):
-    return st.sidebar.number_input(label, min_value=min_, max_value=max_, value=default)
-
-def cat(label):
-    return st.sidebar.selectbox(label, [0, 1])
-
-# Collect inputs
 input_df = pd.DataFrame([{
-    "male": cat("Male? (1 yes / 0 no)"),
-    "age": num("Age", 20, 90, 50),
-    "education": num("Education Level", 1, 4, 1),
-    "currentSmoker": cat("Current Smoker?"),
-    "cigsPerDay": num("Cigarettes Per Day", 0, 60, 0),
-    "BPMeds": cat("On BP Medication?"),
-    "prevalentStroke": cat("Prior Stroke?"),
-    "prevalentHyp": cat("Hypertension?"),
-    "diabetes": cat("Diabetes?"),
-    "totChol": num("Total Cholesterol", 100, 600, 200),
-    "sysBP": num("Systolic BP", 80, 250, 120),
-    "diaBP": num("Diastolic BP", 40, 150, 80),
-    "BMI": num("BMI", 10.0, 60.0, 25.0),
-    "heartRate": num("Heart Rate", 40, 150, 75),
-    "glucose": num("Glucose", 40, 400, 90)
+    "male": male,
+    "age": age,
+    "education": education,
+    "currentSmoker": currentSmoker,
+    "cigsPerDay": cigsPerDay,
+    "BPMeds": BPMeds,
+    "prevalentStroke": prevalentStroke,
+    "prevalentHyp": prevalentHyp,
+    "diabetes": diabetes,
+    "totChol": totChol,
+    "sysBP": sysBP,
+    "diaBP": diaBP,
+    "BMI": BMI,
+    "heartRate": heartRate,
+    "glucose": glucose,
+    # Derived — computed below
+    "pulse_pressure": 0.0,
+    "chol_per_bmi": 0.0,
+    "age_sysbp": 0.0
 }])
 
-# Derived features
+# ---- DERIVED FEATURES ----
 input_df["pulse_pressure"] = input_df["sysBP"] - input_df["diaBP"]
 input_df["chol_per_bmi"] = input_df["totChol"] / input_df["BMI"]
 input_df["age_sysbp"] = input_df["age"] * input_df["sysBP"]
+
+# ============================================
+# ENFORCE EXACT FEATURE ORDER
+# ============================================
+FEATURES = [
+    "male","age","education","currentSmoker","cigsPerDay","BPMeds",
+    "prevalentStroke","prevalentHyp","diabetes","totChol","sysBP",
+    "diaBP","BMI","heartRate","glucose","pulse_pressure","chol_per_bmi","age_sysbp"
+]
+
+input_df = input_df[FEATURES]
+
+st.subheader("Model Input Features")
+st.write(input_df)
 
 # ============================================
 # IMPUTE + CORRECT FEATURE ORDER
