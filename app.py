@@ -122,18 +122,24 @@ input_df["pulse_pressure"] = input_df["sysBP"] - input_df["diaBP"]
 
 # ORDER MUST MATCH TRAINING EXACTLY
 expected_cols = [
+    "male",
     "age",
-    "sex",
+    "education",
+    "currentSmoker",
+    "cigsPerDay",
+    "BPMeds",
+    "prevalentStroke",
+    "prevalentHyp",
+    "diabetes",
     "totChol",
     "sysBP",
     "diaBP",
     "BMI",
-    "currentSmoker",
-    "cigsPerDay",
-    "BPMeds",
-    "diabetes",
+    "heartRate",
     "glucose",
-    "heartRate"
+    "pulse_pressure",
+    "chol_per_bmi",
+    "age_sysbp"
 ]
 
 
