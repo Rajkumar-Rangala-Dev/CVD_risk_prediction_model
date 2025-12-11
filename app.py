@@ -80,7 +80,12 @@ def load_artifacts():
 # Load everything up front
 imputer, scaler, lr_base, rf_base, booster, meta_clf, threshold = load_artifacts()
 
-
+# TEMPORARY: Print exact features expected by the imputer
+try:
+    st.write("IMPUTER FEATURES:", list(imputer.feature_names_in_))
+except Exception as e:
+    st.write("Could not read imputer.feature_names_in_:", e)
+    
 # ----------------------------
 # Sidebar Input Form
 # ----------------------------
