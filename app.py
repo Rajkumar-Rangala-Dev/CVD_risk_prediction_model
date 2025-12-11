@@ -47,9 +47,24 @@ imputer, scaler, lr_model, rf_base, xgb_booster = load_artifacts()
 # FEATURE DEFINITIONS (MUST MATCH TRAINING)
 # ============================================
 FEATURES = [
-    "male","age","education","currentSmoker","cigsPerDay","BPMeds",
-    "prevalentStroke","prevalentHyp","diabetes","totChol","sysBP",
-    "diaBP","BMI","heartRate","glucose","pulse_pressure","chol_per_bmi","age_sysbp"
+  'male',
+ 'age',
+ 'education',
+ 'currentSmoker',
+ 'cigsPerDay',
+ 'BPMeds',
+ 'prevalentStroke',
+ 'prevalentHyp',
+ 'diabetes',
+ 'totChol',
+ 'sysBP',
+ 'diaBP',
+ 'BMI',
+ 'heartRate',
+ 'glucose',
+ 'pulse_pressure',
+ 'chol_per_bmi',
+ 'age_sysbp'
 ]
 
 # ============================================
