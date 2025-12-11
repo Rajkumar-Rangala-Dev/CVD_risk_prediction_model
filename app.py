@@ -6,7 +6,7 @@ import xgboost as xgb
 import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Framingham Stacked CHD Risk", layout="wide")
-st.title("💓 10-Year CHD Risk Prediction — Stacked Ensemble Model")
+st.title("💓 10-Year CHD Risk Prediction Model")
 
 ARTIFACT_DIR = "model_artifacts"
 REQUIRED = ["imputer.pkl", "scaler.pkl", "meta_clf.pkl", "xgb_booster_full.json", "threshold.txt"]
