@@ -1,164 +1,150 @@
-import os
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-import shap
-import xgboost as xgb
-import matplotlib.pyplot as plt
+import json
+import os
 
-# ============================
-# CONFIG
-# ============================
-st.set_page_config(page_title="CVD Risk Predictor", layout="centered")
-st.title("❤️ 10-Year CHD Risk — Stacked ML Model")
+# ============================================
+# CONFIGURATION
+# ============================================
+st.set_page_config(
+    page_title="Clinical 10-Year CHD Risk Calculator",
+    layout="centered",
+    page_icon="❤️"
+)
 
-BASE = os.path.dirname(os.path.abspath(__file__))
-ARTIFACTS = os.path.join(BASE, "model_artifacts")
+st.title("❤️ Clinical 10-Year CHD Risk Calculator (Calibrated Model)")
+st.write("This tool uses a **calibrated logistic regression model**, trained on the Framingham dataset, "
+         "to produce clinically realistic 10-year CHD risk estimates.")
 
-# ============================
+ART = "model_artifacts"
+
+# ============================================
 # LOAD ARTIFACTS
-# ============================
-def load_booster(json_path):
-    booster = xgb.Booster()
-    booster.load_model(json_path)
-    return booster
+# ============================================
+@st.cache_resource
+def load_artifacts():
+    calibrated_lr = joblib.load(os.path.join(ART, "lr_calibrated.pkl"))
+    scaler = joblib.load(os.path.join(ART, "scaler.pkl"))
 
-imputer = joblib.load(os.path.join(ARTIFACTS, "imputer.pkl"))
-scaler = joblib.load(os.path.join(ARTIFACTS, "scaler.pkl"))
-lr_model = joblib.load(os.path.join(ARTIFACTS, "lr_model.pkl"))
-rf_base = joblib.load(os.path.join(ARTIFACTS, "rf_base.pkl"))
-meta_clf = joblib.load(os.path.join(ARTIFACTS, "meta_clf.pkl"))
-booster = load_booster(os.path.join(ARTIFACTS, "xgb_booster_full.json"))
+    with open(os.path.join(ART, "model_metrics.json")) as f:
+        metrics = json.load(f)
 
-with open(os.path.join(ARTIFACTS, "threshold.txt"), "r") as f:
-    threshold = float(f.read().strip())
+    return calibrated_lr, scaler, metrics
 
-# ============================
-# FEATURE ORDER (from imputer)
-# ============================
-EXPECTED_COLS = [
-    "male","age","education","currentSmoker","cigsPerDay","BPMeds",
-    "prevalentStroke","prevalentHyp","diabetes","totChol","sysBP","diaBP",
-    "BMI","heartRate","glucose","pulse_pressure","chol_per_bmi","age_sysbp"
-]
+cal_model, scaler, metrics = load_artifacts()
+FEATURES = metrics["features"]
+TEST_METRICS = metrics["test"]
 
-# ============================
-# USER INPUTS
-# ============================
+# ============================================
+# SIDEBAR INPUTS
+# ============================================
 st.sidebar.header("Patient Information")
 
-male = st.sidebar.selectbox("Male?", [1,0], index=0)
-age = st.sidebar.number_input("Age", 20, 100, 50)
-education = st.sidebar.selectbox("Education level (1–4)", [1,2,3,4])
-currentSmoker = st.sidebar.selectbox("Current smoker?", [0,1])
-cigsPerDay = st.sidebar.number_input("Cigarettes / day", 0, 80, 0)
-BPMeds = st.sidebar.selectbox("On BP meds?", [0,1])
-prevalentStroke = st.sidebar.selectbox("History of stroke?", [0,1])
-prevalentHyp = st.sidebar.selectbox("Hypertension?", [0,1])
-diabetes = st.sidebar.selectbox("Diabetes?", [0,1])
+def num(label, min_, max_, default):
+    return st.sidebar.number_input(label, min_value=min_, max_value=max_, value=default)
 
-totChol = st.sidebar.number_input("Total Cholesterol", 100, 450, 200)
-sysBP = st.sidebar.number_input("Systolic BP", 90, 250, 120)
-diaBP = st.sidebar.number_input("Diastolic BP", 50, 150, 80)
-BMI = st.sidebar.number_input("BMI", 10.0, 60.0, 25.0)
-heartRate = st.sidebar.number_input("Heart Rate", 40, 150, 75)
-glucose = st.sidebar.number_input("Glucose", 40, 400, 90)
+def cat(label):
+    return st.sidebar.selectbox(label, [0, 1])
 
-# ============================
-# BUILD DATAFRAME
-# ============================
+male = cat("Male? (1=yes, 0=no)")
+age = num("Age", 20, 90, 50)
+totChol = num("Total Cholesterol", 120, 400, 200)
+sysBP = num("Systolic BP", 80, 250, 120)
+diaBP = num("Diastolic BP", 40, 150, 80)
+BMI = num("BMI", 15.0, 60.0, 25.0)
+currentSmoker = cat("Current Smoker?")
+cigsPerDay = num("Cigarettes Per Day", 0, 70, 0)
+BPMeds = cat("On BP Medication?")
+diabetes = cat("Diabetes?")
+glucose = num("Glucose", 50, 350, 90)
+heartRate = num("Heart Rate", 40, 150, 75)
+
+# ============================================
+# BUILD INPUT DATAFRAME
+# ============================================
 input_df = pd.DataFrame([{
     "male": male,
     "age": age,
-    "education": education,
-    "currentSmoker": currentSmoker,
-    "cigsPerDay": cigsPerDay,
-    "BPMeds": BPMeds,
-    "prevalentStroke": prevalentStroke,
-    "prevalentHyp": prevalentHyp,
-    "diabetes": diabetes,
     "totChol": totChol,
     "sysBP": sysBP,
     "diaBP": diaBP,
     "BMI": BMI,
-    "heartRate": heartRate,
+    "currentSmoker": currentSmoker,
+    "cigsPerDay": cigsPerDay,
+    "BPMeds": BPMeds,
+    "diabetes": diabetes,
     "glucose": glucose,
+    "heartRate": heartRate
 }])
 
-# ENGINEERED FEATURES
-input_df["pulse_pressure"] = input_df["sysBP"] - input_df["diaBP"]
-input_df["chol_per_bmi"] = input_df["totChol"] / (input_df["BMI"] + 1e-6)
-input_df["age_sysbp"] = input_df["age"] * input_df["sysBP"]
+# Ensure only expected features exist
+input_df = input_df[FEATURES]
 
-# ORDER COLUMNS
-input_df = input_df[EXPECTED_COLS]
-
-st.subheader("Input Data")
+st.subheader("Patient Data")
 st.write(input_df)
 
-# ============================
-# PREPROCESS
-# ============================
-X_imp = pd.DataFrame(imputer.transform(input_df), columns=EXPECTED_COLS)
-X_scaled = pd.DataFrame(scaler.transform(X_imp), columns=EXPECTED_COLS)
+# ============================================
+# MODEL PREDICTION (Calibrated LR)
+# ============================================
+X_scaled = scaler.transform(input_df)
+p = cal_model.predict_proba(X_scaled)[0,1]
 
-# XGBoost uses raw imputed features
-dmat = xgb.DMatrix(X_imp.values, feature_names=EXPECTED_COLS)
+st.subheader("📊 Estimated 10-Year CHD Risk")
+st.metric("Calibrated Risk", f"{p*100:.2f}%")
 
-# ============================
-# BASE MODEL PREDICTIONS
-# ============================
-p_lr = lr_model.predict_proba(X_scaled)[0,1]
-p_rf = rf_base.predict_proba(X_imp)[0,1]
-p_xgb = booster.predict(dmat)[0]
+# ============================================
+# CLINICAL RISK CATEGORIES (ACC/AHA)
+# ============================================
+if p < 0.075:
+    risk_cat = "🟢 LOW RISK (<7.5%)"
+elif p < 0.20:
+    risk_cat = "🟡 INTERMEDIATE RISK (7.5–20%)"
+else:
+    risk_cat = "🔴 HIGH RISK (>20%)"
 
-# ============================
-# STACKED MODEL PREDICTION
-# ============================
-meta_input = np.array([[p_lr, p_rf, p_xgb]])
-p_final = meta_clf.predict_proba(meta_input)[0,1]
+st.subheader("Risk Category")
+st.write(f"**{risk_cat}**")
 
-label = int(p_final >= threshold)
+# ============================================
+# MODEL PERFORMANCE (TEST SET)
+# ============================================
+st.subheader("Model Performance (Held-Out Test Set)")
+st.write(TEST_METRICS)
 
-# ============================
-# DISPLAY RESULTS
-# ============================
-st.subheader("🔎 Model Predictions")
-st.write(pd.DataFrame({
-    "Model":["Logistic Regression","Random Forest","XGBoost","Stacked Model"],
-    "Probability":[p_lr,p_rf,p_xgb,p_final]
-}))
+# ============================================
+# CALIBRATION CURVE
+# ============================================
+st.subheader("Calibration Curve")
+st.image(os.path.join(ART, "calibration_curve.png"))
 
-st.metric("Final CHD Risk", f"{p_final*100:.2f}%")
-st.write(f"Decision Threshold: **{threshold:.3f}**")
-st.write(f"Predicted Class: **{label}**")
+# ============================================
+# FRAMINGHAM-LIKE POINT SCORE
+# ============================================
+st.subheader("📌 Framingham-Style Point Score")
 
-# ============================
-# SHAP EXPLANATION
-# ============================
-st.subheader("Explainability — XGBoost SHAP")
+# Extract LR coefficients
+coef = cal_model.calibrated_classifiers_[0].base_estimator.coef_[0]
 
-if st.checkbox("Show SHAP Explanation"):
-    explainer = shap.TreeExplainer(booster)
-    shap_values = explainer.shap_values(X_imp)
+def compute_points(row):
+    points = 0
+    detailed = {}
+    for feat, w in zip(FEATURES, coef):
+        contrib = row[feat] * w
+        pts = int(round(contrib * 10))
+        points += pts
+        detailed[feat] = pts
+    return points, detailed
 
-    shap_df = pd.DataFrame({
-        "feature": EXPECTED_COLS,
-        "shap_value": shap_values[0]
-    }).sort_values("shap_value", key=abs, ascending=False)
+pts, detailed_pts = compute_points(input_df.iloc[0])
 
-    fig, ax = plt.subplots(figsize=(6,8))
-    ax.barh(shap_df["feature"], shap_df["shap_value"])
-    ax.invert_yaxis()
-    st.pyplot(fig)
-    st.dataframe(shap_df)
+st.write(f"**Total Points: {pts} points**")
 
-# ============================
-# DEBUG INFO
-# ============================
-with st.expander("Debug Info"):
-    st.write("Expected Columns:", EXPECTED_COLS)
-    st.write("Imputed:", X_imp)
-    st.write("Scaled:", X_scaled)
-    st.write("Meta Input:", meta_input)
+with st.expander("Detailed Point Breakdown"):
+    st.write(pd.DataFrame.from_dict(detailed_pts, orient="index", columns=["Points"]))
+
+# ============================================
+# FOOTER
+# ============================================
+st.info("This model is calibrated on the Framingham dataset but is **not a substitute for professional medical advice**.")
