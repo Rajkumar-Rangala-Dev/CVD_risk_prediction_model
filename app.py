@@ -116,26 +116,21 @@ input_df["chol_per_bmi"] = input_df["totChol"] / input_df["BMI"]
 input_df["pulse_pressure"] = input_df["sysBP"] - input_df["diaBP"]
 
 # ORDER MUST MATCH TRAINING EXACTLY
-expected_cols = [
+EXPECTED_COLS = [
     "age",
-    "education",
-    "currentSmoker",
-    "cigsPerDay",
-    "BPMeds",
-    "prevalentStroke",
-    "prevalentHyp",
-    "diabetes",
+    "sex",
     "totChol",
     "sysBP",
     "diaBP",
     "BMI",
-    "heartRate",
+    "currentSmoker",
+    "cigsPerDay",
+    "BPMeds",
+    "diabetes",
     "glucose",
-    "male",
-    "age_sysbp",
-    "chol_per_bmi",
-    "pulse_pressure"
+    "heartRate"
 ]
+
 
 # Ensure ALL expected columns exist
 missing_cols = [c for c in expected_cols if c not in input_df.columns]
