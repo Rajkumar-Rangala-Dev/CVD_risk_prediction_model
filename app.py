@@ -122,19 +122,25 @@ st.image(os.path.join(ART, "calibration_curve.png"))
 # ============================================
 # FRAMINGHAM-LIKE POINT SCORE
 # ============================================
+# ============================================
+# FRAMINGHAM-LIKE POINT SCORE
+# ============================================
 st.subheader("📌 Framingham-Style Point Score")
 
-# Extract LR coefficients
-coef = cal_model.calibrated_classifiers_[0].base_estimator.coef_[0]
+# Correct extraction of the logistic regression inside the calibrated model
+base_lr = cal_model.calibrated_classifiers_[0].base_estimator
+coef = base_lr.coef_[0]
 
 def compute_points(row):
     points = 0
     detailed = {}
-    for feat, w in zip(FEATURES, coef):
-        contrib = row[feat] * w
-        pts = int(round(contrib * 10))
+
+    for feat, weight in zip(FEATURES, coef):
+        contribution = row[feat] * weight
+        pts = int(round(contribution * 10))  # scaling factor
         points += pts
         detailed[feat] = pts
+
     return points, detailed
 
 pts, detailed_pts = compute_points(input_df.iloc[0])
@@ -143,6 +149,7 @@ st.write(f"**Total Points: {pts} points**")
 
 with st.expander("Detailed Point Breakdown"):
     st.write(pd.DataFrame.from_dict(detailed_pts, orient="index", columns=["Points"]))
+
 
 # ============================================
 # FOOTER
