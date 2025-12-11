@@ -116,7 +116,7 @@ input_df["chol_per_bmi"] = input_df["totChol"] / input_df["BMI"]
 input_df["pulse_pressure"] = input_df["sysBP"] - input_df["diaBP"]
 
 # ORDER MUST MATCH TRAINING EXACTLY
-EXPECTED_COLS = [
+expected_cols = [
     "age",
     "sex",
     "totChol",
