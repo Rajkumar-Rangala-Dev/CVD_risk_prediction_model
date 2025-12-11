@@ -9,7 +9,7 @@ import xgboost as xgb
 import matplotlib.pyplot as plt
 
 # ============================================
-# CONFIGURATION
+# APP CONFIG
 # ============================================
 st.set_page_config(
     page_title="CVD Risk Prediction",
@@ -18,18 +18,20 @@ st.set_page_config(
 )
 
 st.title("❤️ Cardiovascular Disease Risk Prediction")
-st.write("This app predicts the **10-year CVD risk** using Logistic Regression, Random Forest, and XGBoost, "
+st.write("This app predicts the **10-year CVD risk** using Logistic Regression, Random Forest, and XGBoost models, "
          "and combines them using a safe, stable ensemble method compatible with Streamlit Cloud.")
 
 ART = "model_artifacts"
 
 # ============================================
-# LOAD ARTIFACTS
+# LOAD MODELS + ARTIFACTS
 # ============================================
 @st.cache_resource
 def load_artifacts():
     imputer = joblib.load(os.path.join(ART, "imputer.pkl"))
     scaler = joblib.load(os.path.join(ART, "scaler.pkl"))
+
+    # Correct model filenames
     lr_model = joblib.load(os.path.join(ART, "lr_model.pkl"))
     rf_base = joblib.load(os.path.join(ART, "rf_base.pkl"))
 
@@ -37,14 +39,13 @@ def load_artifacts():
     xgb_booster = xgb.Booster()
     xgb_booster.load_model(os.path.join(ART, "xgb_booster_full.json"))
 
-    with open(os.path.join(ART, "threshold.txt")) as f:
-        threshold = float(f.read().strip())
+    return imputer, scaler, lr_model, rf_base, xgb_booster
 
-    return imputer, scaler, lr_model, rf_base, xgb_booster, threshold
+imputer, scaler, lr_model, rf_base, xgb_booster = load_artifacts()
 
-imputer, scaler, lr_model, rf_base, xgb_booster, threshold = load_artifacts()
-
-# Feature order expected by models
+# ============================================
+# FEATURE DEFINITIONS (MUST MATCH TRAINING)
+# ============================================
 FEATURES = [
     "male","age","education","currentSmoker","cigsPerDay","BPMeds",
     "prevalentStroke","prevalentHyp","diabetes","totChol","sysBP",
@@ -62,6 +63,7 @@ def num(label, min_, max_, default):
 def cat(label):
     return st.sidebar.selectbox(label, [0, 1])
 
+# Collect inputs
 input_df = pd.DataFrame([{
     "male": cat("Male? (1 yes / 0 no)"),
     "age": num("Age", 20, 90, 50),
@@ -77,11 +79,7 @@ input_df = pd.DataFrame([{
     "diaBP": num("Diastolic BP", 40, 150, 80),
     "BMI": num("BMI", 10.0, 60.0, 25.0),
     "heartRate": num("Heart Rate", 40, 150, 75),
-    "glucose": num("Glucose", 40, 400, 90),
-    # Derived features
-    "pulse_pressure": 0.0,
-    "chol_per_bmi": 0.0,
-    "age_sysbp": 0.0
+    "glucose": num("Glucose", 40, 400, 90)
 }])
 
 # Derived features
@@ -90,9 +88,15 @@ input_df["chol_per_bmi"] = input_df["totChol"] / input_df["BMI"]
 input_df["age_sysbp"] = input_df["age"] * input_df["sysBP"]
 
 # ============================================
-# IMPUTE + SCALE
+# IMPUTE + CORRECT FEATURE ORDER
 # ============================================
-X_imp = pd.DataFrame(imputer.transform(input_df[FEATURES]), columns=FEATURES)
+# Impute using training order
+X_imp = pd.DataFrame(imputer.transform(input_df[FEATURES]), columns=imputer.feature_names_in_)
+
+# Force exact training order
+X_imp = X_imp[FEATURES]
+
+# Scale
 X_scaled = scaler.transform(X_imp)
 
 # ============================================
@@ -109,7 +113,7 @@ dmat = xgb.DMatrix(X_scaled, feature_names=FEATURES)
 xgb_p = float(xgb_booster.predict(dmat)[0])
 
 # ============================================
-# SAFE ENSEMBLE (No meta-model)
+# SAFE ENSEMBLE (average)
 # ============================================
 ensemble_p = float(np.mean([lr_p, rf_p, xgb_p]))
 
@@ -117,7 +121,7 @@ st.subheader("📊 Predicted 10-Year CVD Risk")
 st.metric("Ensemble Risk", f"{ensemble_p*100:.2f}%")
 
 # ============================================
-# INTERPRETATION
+# RISK CATEGORY
 # ============================================
 if ensemble_p < 0.075:
     risk_cat = "🟢 LOW RISK (<7.5%)"
@@ -130,15 +134,13 @@ st.subheader("Risk Category")
 st.write(f"**{risk_cat}**")
 
 # ============================================
-# SHAP EXPLANATION
+# SHAP EXPLANATION (Random Forest)
 # ============================================
 st.subheader("Feature Importance (SHAP)")
 
-# Use Random Forest for SHAP local explanations
 explainer = shap.TreeExplainer(rf_base)
-shap_vals = explainer.shap_values(X_imp)[1]  # class 1
+shap_vals = explainer.shap_values(X_imp)[1]
 
-# Bar chart
 fig, ax = plt.subplots()
 shap.summary_plot(shap_vals, X_imp, plot_type="bar", show=False)
 st.pyplot(fig)
@@ -146,6 +148,5 @@ st.pyplot(fig)
 # ============================================
 # FOOTER
 # ============================================
-st.info("This model uses an ensemble of LR, RF, and XGB base models. "
-        "The ensemble method is designed for cross-version compatibility "
-        "and safe deployment on Streamlit Cloud.")
+st.info("This model uses an ensemble of Logistic Regression, Random Forest, and XGBoost. "
+        "It is engineered for compatibility with Streamlit Cloud and sklearn 1.8.")
