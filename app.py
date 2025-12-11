@@ -30,7 +30,7 @@ ART = "model_artifacts"
 def load_artifacts():
     imputer = joblib.load(os.path.join(ART, "imputer.pkl"))
     scaler = joblib.load(os.path.join(ART, "scaler.pkl"))
-    lr_base = joblib.load(os.path.join(ART, "lr_base.pkl"))
+    lr_model = joblib.load(os.path.join(ART, "lr_model.pkl"))
     rf_base = joblib.load(os.path.join(ART, "rf_base.pkl"))
 
     # Load XGBoost booster manually
@@ -40,9 +40,9 @@ def load_artifacts():
     with open(os.path.join(ART, "threshold.txt")) as f:
         threshold = float(f.read().strip())
 
-    return imputer, scaler, lr_base, rf_base, xgb_booster, threshold
+    return imputer, scaler, lr_model, rf_base, xgb_booster, threshold
 
-imputer, scaler, lr_base, rf_base, xgb_booster, threshold = load_artifacts()
+imputer, scaler, lr_model, rf_base, xgb_booster, threshold = load_artifacts()
 
 # Feature order expected by models
 FEATURES = [
@@ -99,7 +99,7 @@ X_scaled = scaler.transform(X_imp)
 # MODEL PREDICTIONS
 # ============================================
 # 1) Logistic Regression
-lr_p = lr_base.predict_proba(X_scaled)[0, 1]
+lr_p = lr_model.predict_proba(X_scaled)[0, 1]
 
 # 2) Random Forest
 rf_p = rf_base.predict_proba(X_scaled)[0, 1]
