@@ -26,7 +26,7 @@ def load_booster(json_path):
 
 imputer = joblib.load(os.path.join(ARTIFACTS, "imputer.pkl"))
 scaler = joblib.load(os.path.join(ARTIFACTS, "scaler.pkl"))
-lr_base = joblib.load(os.path.join(ARTIFACTS, "lr_base.pkl"))
+lr_model = joblib.load(os.path.join(ARTIFACTS, "lr_model.pkl"))
 rf_base = joblib.load(os.path.join(ARTIFACTS, "rf_base.pkl"))
 meta_clf = joblib.load(os.path.join(ARTIFACTS, "meta_clf.pkl"))
 booster = load_booster(os.path.join(ARTIFACTS, "xgb_booster_full.json"))
@@ -109,7 +109,7 @@ dmat = xgb.DMatrix(X_imp.values, feature_names=EXPECTED_COLS)
 # ============================
 # BASE MODEL PREDICTIONS
 # ============================
-p_lr = lr_base.predict_proba(X_scaled)[0,1]
+p_lr = lr_model.predict_proba(X_scaled)[0,1]
 p_rf = rf_base.predict_proba(X_imp)[0,1]
 p_xgb = booster.predict(dmat)[0]
 
