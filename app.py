@@ -6,7 +6,7 @@ import xgboost as xgb
 import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Framingham Stacked CHD Risk", layout="wide")
-st.title("💓 10-Year CHD Risk Prediction Model")
+st.title("10-Year CHD Risk Prediction Model")
 
 ARTIFACT_DIR = "model_artifacts"
 REQUIRED = ["imputer.pkl", "scaler.pkl", "meta_clf.pkl", "xgb_booster_full.json", "threshold.txt"]
@@ -155,7 +155,7 @@ input_dict = {
 }
 
 input_df = pd.DataFrame([input_dict])
-st.subheader("📋 Input Summary")
+st.subheader(" Input Summary 📋")
 st.table(input_df.T)
 
 # -----------------------------
@@ -192,7 +192,7 @@ elif meta_proba < 0.20:
 else:
     risk_cat = "🔴 High Risk (>20%)"
 
-st.markdown("## 🧠 Prediction Result")
+st.markdown("## Prediction Result")
 st.metric("10-year CHD Risk", f"{meta_proba*100:.2f}%")
 st.write(f"**Risk Category:** {risk_cat}")
 
